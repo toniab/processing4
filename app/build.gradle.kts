@@ -18,6 +18,7 @@ plugins{
     alias(libs.plugins.jetbrainsCompose)
     alias(libs.plugins.serialization)
     alias(libs.plugins.download)
+
 }
 
 repositories{
@@ -110,6 +111,7 @@ dependencies {
     implementation(compose.ui)
     implementation(compose.components.resources)
     implementation(compose.components.uiToolingPreview)
+    implementation(compose.materialIconsExtended)
 
     implementation(compose.desktop.currentOs)
 
