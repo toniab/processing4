@@ -1,5 +1,6 @@
 package processing.app.ui
 
+import java.io.File
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,11 +24,43 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.singleWindowApplication
+
+const val SKETCHBOOK_PATH = "/Users/tonz/Documents/Processing/sketchbook/"
+
+enum class SortOption(val label: String) {
+    RECENTLY_UPDATED("Recently Updated"),
+    ALPHABETICAL("Alphabetical");
+
+    override fun toString(): String = label
+}
 
 data class SketchItem(
     val name: String,
-    val isFolder: Boolean,
+    //val isFolder: Boolean,
+    val path: String,
     val lastModified: Long = 0L // default for folders
+)
+
+data class SketchCollection(
+    val name: String,
+    val path: String,
+    val lastModified: Long,
+    val subcollections: List<SketchCollection>,
+    val sketches: List<SketchItem>
+)
+
+data class DisplayItem(
+    val name: String,
+    val isFolder: Boolean,
+    val indentLevel: Int
 )
 
 fun main() = application {
@@ -40,24 +73,92 @@ fun main() = application {
     }
 }
 
+fun scanCollection(dir: File): SketchCollection {
+    val allSubDirs = dir.listFiles()
+        ?.filter { it.isDirectory }
+        ?: emptyList()
+
+    val (sketchFolders, normalSubcollections) = allSubDirs.partition { containsPdeFile(it) }
+
+    val sketches = sketchFolders.map { folder ->
+        SketchItem(
+            name = folder.name,
+            path = folder.absolutePath,
+            lastModified = folder.lastModified()
+        )
+    }
+
+    val subcollections = normalSubcollections.map { scanCollection(it) }
+
+    return SketchCollection(
+        name = dir.name,
+        path = dir.absolutePath,
+        lastModified = dir.lastModified(),
+        subcollections = subcollections,
+        sketches = sketches
+    )
+}
+
+fun containsPdeFile(folder: File): Boolean {
+    return folder.listFiles()?.any { it.isFile && it.extension.equals("pde", true) } == true
+}
+
+fun flattenSketchesForGridDisplay(collection: SketchCollection): List<SketchItem> {
+    val childSketches = collection.subcollections.flatMap { flattenSketchesForGridDisplay(it) }
+    return collection.sketches + childSketches
+}
+
+fun flattenHierarchyForSidebarDisplay(collection: SketchCollection, indentLevel: Int = 0): List<DisplayItem> {
+    val items = mutableListOf<DisplayItem>()
+    collection.sketches.forEach {
+        items.add(DisplayItem(it.name, isFolder = false, indentLevel = indentLevel))
+    }
+    collection.subcollections.forEach {
+        items.add(DisplayItem(it.name, isFolder = true, indentLevel = indentLevel))
+        items.addAll(flattenHierarchyForSidebarDisplay(it, indentLevel + 1))
+    }
+    return items
+}
+
 @Composable
 fun Sketchbook() {
-    // TODO: Replace dummy data with reading from folder.
+    val sketchbookFolder = File(SKETCHBOOK_PATH);
+    var sketchHierarchy = SketchCollection(
+        name = sketchbookFolder.name,
+        path = sketchbookFolder.absolutePath,
+        lastModified = sketchbookFolder.lastModified(),
+        subcollections = emptyList(),
+        sketches = emptyList<SketchItem>()
+    )
+
+    if (sketchbookFolder.exists() && sketchbookFolder.isDirectory) {
+        sketchHierarchy = scanCollection(sketchbookFolder);
+    }
+
+
+    /*Dummy Data
     val sketchList = listOf(
             SketchItem("Fun", false, 1680000000000),
             SketchItem("Cute", false, 1660000000000),
             SketchItem("MyFolder", true),
             SketchItem("Silly", false, 1670000000000),
         )
+    */
+    var sortOption by remember { mutableStateOf(SortOption.RECENTLY_UPDATED) }
+    var searchQuery by remember { mutableStateOf("") }
 
-    var sortOption by remember { mutableStateOf("Recently Updated") }
+    val flattenedSketches = flattenSketchesForGridDisplay(sketchHierarchy);
 
-    val sortedSketches = when (sortOption) {
-            "Alphabetical" -> sketchList.sortedBy { it.name.lowercase() }
-            "Recently Updated" -> sketchList.sortedByDescending { it.lastModified }
-            else -> sketchList
+    val filteredSketches = when {
+        searchQuery.isBlank() -> flattenedSketches
+        else -> flattenedSketches.filter { it.name.contains(searchQuery, ignoreCase = true) }
     }
 
+    val sortedSketches = when (sortOption) {
+        SortOption.ALPHABETICAL -> filteredSketches.sortedBy { it.name.lowercase() }
+        SortOption.RECENTLY_UPDATED -> filteredSketches.sortedByDescending { it.lastModified }
+        else -> filteredSketches
+    }
 
     Row(Modifier.fillMaxSize()) {
         Column(
@@ -66,7 +167,9 @@ fun Sketchbook() {
                 .fillMaxHeight()
                 .padding(8.dp)
         ) {
-            Sidebar(sketchList)
+            Sidebar(sketchHierarchy, onSearchQueryChange = { newQuery ->
+                searchQuery = newQuery
+            })
         }
 
         Column(
@@ -76,9 +179,9 @@ fun Sketchbook() {
                 .padding(8.dp)
         ) {
             MainSketchGrid(
-                sketches = sortedSketches.filter { !it.isFolder },
+                sketches = sortedSketches,
                 selectedFolder = null,
-                searchQuery = "",
+                searchQuery = searchQuery,
                 sortOption = sortOption,
                 onSortChange = { sortOption = it }
             )
@@ -87,110 +190,156 @@ fun Sketchbook() {
 }
 
 @Composable
-fun Sidebar(sketches: List<SketchItem>) {
-    var searchText by remember { mutableStateOf("") }
-
-    Column(
-        modifier = Modifier.fillMaxHeight().width(350.dp)
+fun SidebarHierarchy(items: List<DisplayItem>) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column() {
-                Text(
-                    text = "Sketchbook",
-                    style = MaterialTheme.typography.h4,
-                )
-                TextField(
-                    value = searchText,
-                    onValueChange = { searchText = it },
-                    placeholder = { Text("Search...") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .weight(1f)
-                .padding(8.dp)
-        ) {
-
-            items(sketches) { sketch ->
-                SketchRow(sketch)
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(onClick = { println("Clicked track folder")  },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                contentPadding = PaddingValues(
-                    start = 8.dp,  // less left padding (default is 16.dp)
-                    top = 12.dp,
-                    end = 16.dp,
-                    bottom = 12.dp
-                )
+        items(items) { item ->
+            ContextMenuArea(
+                items = {
+                    if (item.isFolder) {
+                        listOf(
+                            ContextMenuItem("Open in Explorer") {
+                                println("Show File ${item.name}")
+                            },
+                            ContextMenuItem("Hide Folder") {
+                                println("Hide folder ${item.name}")
+                            },
+                        )
+                    } else {
+                        listOf(
+                            ContextMenuItem("Open in Explorer") {
+                                println("Show File ${item.name}")
+                            },
+                            ContextMenuItem("Favorite Sketch") {
+                                println("Favorite sketch ${item.name}")
+                            },
+                        )
+                    }
+                }
             ) {
-                Image(
-                    imageVector = Icons.Outlined.Build,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Track Folder")
-            }
-            Button(onClick = { println("Clicked add folder") },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                contentPadding = PaddingValues(
-                    start = 8.dp,  // less left padding (default is 16.dp)
-                    top = 12.dp,
-                    end = 16.dp,
-                    bottom = 12.dp
-                )
-            ) {
-                Image(
-                    imageVector = Icons.Outlined.AddCircle,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("New Folder")
+                SidebarItemRow(item.name, item.isFolder, item.indentLevel)
             }
         }
     }
 }
 
 @Composable
-fun SketchRow(sketch: SketchItem) {
+fun Sidebar(sketchHierarchy: SketchCollection, onSearchQueryChange: (String) -> Unit) {
+    val flatItems = remember(sketchHierarchy) {
+        flattenHierarchyForSidebarDisplay(sketchHierarchy)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxHeight().width(350.dp)
+    ) {
+        SidebarSearchbar(onSearchQueryChange)
+
+        Box(modifier = Modifier.weight(1f)) {
+            SidebarHierarchy(flatItems)
+        }
+
+        SidebarBottom()
+    }
+}
+
+@Composable
+fun SidebarSearchbar(onSearchQueryChange: (String) -> Unit) {
+    var searchText by remember { mutableStateOf("") }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(4.dp)
-            .clickable { println("Clicked on ${sketch.name}") },
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val icon: ImageVector = if (sketch.isFolder) Icons.Outlined.MailOutline else Icons.Outlined.Face
+        Column() {
+            Text(
+                text = "Sketchbook",
+                style = MaterialTheme.typography.h4,
+            )
+            TextField(
+                value = searchText,
+                onValueChange = {
+                    searchText = it
+                    onSearchQueryChange(it)
+                },
+                placeholder = { Text("Search...") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+fun SidebarBottom() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Button(onClick = { println("Clicked track folder")  },
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp),
+            contentPadding = PaddingValues(
+                start = 8.dp,  // less left padding (default is 16.dp)
+                top = 12.dp,
+                end = 16.dp,
+                bottom = 12.dp
+            )
+        ) {
+            Image(
+                imageVector = Icons.Outlined.Build,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Track Folder")
+        }
+        Button(onClick = { println("Clicked add folder") },
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp),
+            contentPadding = PaddingValues(
+                start = 8.dp,  // less left padding (default is 16.dp)
+                top = 12.dp,
+                end = 16.dp,
+                bottom = 12.dp
+            )
+        ) {
+            Image(
+                imageVector = Icons.Outlined.AddCircle,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("New Folder")
+        }
+    }
+}
+
+@Composable
+fun SidebarItemRow(name: String, isFolder: Boolean, indentLevel: Int = 0) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (indentLevel * 16).dp, top = 4.dp, bottom = 4.dp)
+            .clickable { println("Clicked on ${name}") },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val icon: ImageVector = if (isFolder) Icons.Outlined.MailOutline else Icons.Outlined.Face
+
         Image(
             imageVector = icon,
             contentDescription = null,
             modifier = Modifier.size(24.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(text = sketch.name)
+        Text(text = name, style = if (isFolder) MaterialTheme.typography.subtitle1 else MaterialTheme.typography.body1)
     }
 }
 
@@ -199,8 +348,8 @@ fun MainSketchGrid(
     sketches: List<SketchItem>,
     selectedFolder: String?,
     searchQuery: String,
-    sortOption: String,
-    onSortChange: (String) -> Unit
+    sortOption: SortOption,
+    onSortChange: (SortOption) -> Unit
 ) {
     val displayedHeader = when {
         selectedFolder != null -> selectedFolder
@@ -227,16 +376,16 @@ fun MainSketchGrid(
                 onDismissRequest = { expanded = false }
             ) {
                 DropdownMenuItem(onClick = {
-                    onSortChange("Recently Updated")
+                    onSortChange(SortOption.RECENTLY_UPDATED)
                     expanded = false
                 }) {
-                    Text("Recently Updated")
+                    Text(SortOption.RECENTLY_UPDATED.label)
                 }
                 DropdownMenuItem(onClick = {
-                    onSortChange("Alphabetical")
+                    onSortChange(SortOption.ALPHABETICAL)
                     expanded = false
                 }) {
-                    Text("Alphabetical")
+                    Text(SortOption.ALPHABETICAL.label)
                 }
             }
         }
@@ -253,7 +402,20 @@ fun MainSketchGrid(
                 AddNewSketchCard()
             }
             items(sketches) { sketch ->
-                SketchCard(sketch)
+                ContextMenuArea(
+                    items = {
+                        listOf(
+                            ContextMenuItem("Open in Explorer") {
+                                println("Show File ${sketch.name}")
+                            },
+                            ContextMenuItem("Favorite Sketch") {
+                                println("Favorite ${sketch.name}")
+                            },
+                        )
+                    }
+                ) {
+                    SketchCard(sketch)
+                }
             }
         }
     }
@@ -326,13 +488,13 @@ fun SketchCard(sketch: SketchItem) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(sketch.name, style = MaterialTheme.typography.body1)
-                Icon(
+                /*Icon(
                     imageVector = Icons.Outlined.Info,
                     contentDescription = "Sketch Info",
                     modifier = Modifier.size(20.dp).clickable {
                         println("Clicked info for ${sketch.name}")
                     }
-                )
+                )*/
             }
         }
     }
