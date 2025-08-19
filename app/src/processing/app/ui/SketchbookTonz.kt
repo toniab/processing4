@@ -1,12 +1,13 @@
 package processing.app.ui
 
+import java.awt.Desktop
+import java.net.URI
 import java.io.File
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.*
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.items
@@ -26,12 +27,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
-import androidx.compose.foundation.background
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.singleWindowApplication
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.input.pointer.pointerMoveFilter
 
 const val SKETCHBOOK_PATH = "/Users/tonz/Documents/Processing/sketchbook/"
 
@@ -59,6 +62,7 @@ data class SketchCollection(
 
 data class DisplayItem(
     val name: String,
+    val path: String,
     val isFolder: Boolean,
     val indentLevel: Int
 )
@@ -110,19 +114,22 @@ fun flattenSketchesForGridDisplay(collection: SketchCollection): List<SketchItem
 
 fun flattenHierarchyForSidebarDisplay(collection: SketchCollection, indentLevel: Int = 0): List<DisplayItem> {
     val items = mutableListOf<DisplayItem>()
-    collection.sketches.forEach {
-        items.add(DisplayItem(it.name, isFolder = false, indentLevel = indentLevel))
-    }
+
+    items.add(DisplayItem(collection.name, collection.path, isFolder = true, indentLevel = indentLevel))
+
     collection.subcollections.forEach {
-        items.add(DisplayItem(it.name, isFolder = true, indentLevel = indentLevel))
         items.addAll(flattenHierarchyForSidebarDisplay(it, indentLevel + 1))
     }
+
     return items
 }
 
 @Composable
 fun Sketchbook() {
+    var selectedFolder by remember { mutableStateOf<SketchCollection?>(null) }
+
     val sketchbookFolder = File(SKETCHBOOK_PATH);
+
     var sketchHierarchy = SketchCollection(
         name = sketchbookFolder.name,
         path = sketchbookFolder.absolutePath,
@@ -135,29 +142,24 @@ fun Sketchbook() {
         sketchHierarchy = scanCollection(sketchbookFolder);
     }
 
-
-    /*Dummy Data
-    val sketchList = listOf(
-            SketchItem("Fun", false, 1680000000000),
-            SketchItem("Cute", false, 1660000000000),
-            SketchItem("MyFolder", true),
-            SketchItem("Silly", false, 1670000000000),
-        )
-    */
     var sortOption by remember { mutableStateOf(SortOption.RECENTLY_UPDATED) }
     var searchQuery by remember { mutableStateOf("") }
 
-    val flattenedSketches = flattenSketchesForGridDisplay(sketchHierarchy);
-
-    val filteredSketches = when {
-        searchQuery.isBlank() -> flattenedSketches
-        else -> flattenedSketches.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    val flattenedSketchesForGrid = if (selectedFolder != null) {
+        flattenSketchesForGridDisplay(selectedFolder!!)
+    } else {
+        flattenSketchesForGridDisplay(sketchHierarchy)
     }
 
-    val sortedSketches = when (sortOption) {
-        SortOption.ALPHABETICAL -> filteredSketches.sortedBy { it.name.lowercase() }
-        SortOption.RECENTLY_UPDATED -> filteredSketches.sortedByDescending { it.lastModified }
-        else -> filteredSketches
+    val filteredSketchesForGrid = when {
+        searchQuery.isBlank() -> flattenedSketchesForGrid
+        else -> flattenedSketchesForGrid.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    }
+
+    val sortedSketchesForGrid = when (sortOption) {
+        SortOption.ALPHABETICAL -> filteredSketchesForGrid.sortedBy { it.name.lowercase() }
+        SortOption.RECENTLY_UPDATED -> filteredSketchesForGrid.sortedByDescending { it.lastModified }
+        else -> filteredSketchesForGrid
     }
 
     Row(Modifier.fillMaxSize()) {
@@ -167,8 +169,12 @@ fun Sketchbook() {
                 .fillMaxHeight()
                 .padding(8.dp)
         ) {
-            Sidebar(sketchHierarchy, onSearchQueryChange = { newQuery ->
+            Sidebar(sketchHierarchy
+                , onSearchQueryChange = { newQuery ->
                 searchQuery = newQuery
+            }
+            , onFolderClick = { folderItem ->
+                selectedFolder = findFolderByPath(sketchHierarchy, folderItem.path)
             })
         }
 
@@ -179,8 +185,8 @@ fun Sketchbook() {
                 .padding(8.dp)
         ) {
             MainSketchGrid(
-                sketches = sortedSketches,
-                selectedFolder = null,
+                sketches = sortedSketchesForGrid,
+                selectedFolder = selectedFolder?.name,
                 searchQuery = searchQuery,
                 sortOption = sortOption,
                 onSortChange = { sortOption = it }
@@ -190,44 +196,7 @@ fun Sketchbook() {
 }
 
 @Composable
-fun SidebarHierarchy(items: List<DisplayItem>) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(8.dp)
-    ) {
-        items(items) { item ->
-            ContextMenuArea(
-                items = {
-                    if (item.isFolder) {
-                        listOf(
-                            ContextMenuItem("Open in Explorer") {
-                                println("Show File ${item.name}")
-                            },
-                            ContextMenuItem("Hide Folder") {
-                                println("Hide folder ${item.name}")
-                            },
-                        )
-                    } else {
-                        listOf(
-                            ContextMenuItem("Open in Explorer") {
-                                println("Show File ${item.name}")
-                            },
-                            ContextMenuItem("Favorite Sketch") {
-                                println("Favorite sketch ${item.name}")
-                            },
-                        )
-                    }
-                }
-            ) {
-                SidebarItemRow(item.name, item.isFolder, item.indentLevel)
-            }
-        }
-    }
-}
-
-@Composable
-fun Sidebar(sketchHierarchy: SketchCollection, onSearchQueryChange: (String) -> Unit) {
+fun Sidebar(sketchHierarchy: SketchCollection, onSearchQueryChange: (String) -> Unit, onFolderClick: (DisplayItem) -> Unit) {
     val flatItems = remember(sketchHierarchy) {
         flattenHierarchyForSidebarDisplay(sketchHierarchy)
     }
@@ -238,11 +207,20 @@ fun Sidebar(sketchHierarchy: SketchCollection, onSearchQueryChange: (String) -> 
         SidebarSearchbar(onSearchQueryChange)
 
         Box(modifier = Modifier.weight(1f)) {
-            SidebarHierarchy(flatItems)
+            SidebarHierarchy(flatItems, onFolderClick)
         }
 
         SidebarBottom()
     }
+}
+
+fun findFolderByPath(collection: SketchCollection, path: String): SketchCollection? {
+    if (collection.path == path) return collection
+    for (sub in collection.subcollections) {
+        val found = findFolderByPath(sub, path)
+        if (found != null) return found
+    }
+    return null
 }
 
 @Composable
@@ -281,7 +259,7 @@ fun SidebarBottom() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Button(onClick = { println("Clicked track folder")  },
+        Button(onClick = { println("Clicked add folder")  },
             modifier = Modifier
                 .weight(1f)
                 .height(48.dp),
@@ -298,9 +276,9 @@ fun SidebarBottom() {
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Track Folder")
+            Text("Add Folder")
         }
-        Button(onClick = { println("Clicked add folder") },
+        Button(onClick = { println("Clicked create folder") },
             modifier = Modifier
                 .weight(1f)
                 .height(48.dp),
@@ -317,29 +295,91 @@ fun SidebarBottom() {
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Text("New Folder")
+            Text("Create Folder")
         }
     }
 }
 
 @Composable
-fun SidebarItemRow(name: String, isFolder: Boolean, indentLevel: Int = 0) {
+fun SidebarHierarchy(items: List<DisplayItem>, onFolderClick: (DisplayItem) -> Unit) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(8.dp)
+    ) {
+        items(items) { item ->
+            SidebarItemRow(item.name, item.isFolder, item.indentLevel, onFolderClick = {
+                if (item.isFolder) {
+                    onFolderClick(item)
+                }
+            })
+        }
+
+    }
+}
+
+@Composable
+fun SidebarItemRow(name: String, isFolder: Boolean, indentLevel: Int = 0, onFolderClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    var showContextMenu by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (isHovered || showContextMenu) MaterialTheme.colors.primary.copy(alpha = 0.1f) else Color.Transparent)
+            .hoverable(interactionSource)
             .padding(start = (indentLevel * 16).dp, top = 4.dp, bottom = 4.dp)
-            .clickable { println("Clicked on ${name}") },
-        verticalAlignment = Alignment.CenterVertically
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { println("Clicked on ${name}"); onFolderClick(); },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        val icon: ImageVector = if (isFolder) Icons.Outlined.MailOutline else Icons.Outlined.Face
+        val folderIcon: ImageVector = if (isFolder) Icons.Outlined.MailOutline else Icons.Outlined.Face
 
-        Image(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(text = name, style = if (isFolder) MaterialTheme.typography.subtitle1 else MaterialTheme.typography.body1)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = folderIcon,
+                contentDescription = "Folder Icon",
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = name)
+        }
+
+        Box() {
+            if (isHovered || showContextMenu) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(Color.Transparent)
+                        .clickable(interactionSource = remember { MutableInteractionSource() },
+                            indication = null){ showContextMenu = true }
+                )
+            } else {
+                // Optionally reserve space so text doesn't shift
+                Spacer(modifier = Modifier.size(24.dp)) // match IconButton size
+            }
+            DropdownMenu(
+                expanded = showContextMenu,
+                onDismissRequest = { showContextMenu = false }
+            ) {
+                DropdownMenuItem(onClick = {
+                    println("Open in Explorer: $name")
+                    showContextMenu = false
+                }) {
+                    Text("Open in Explorer")
+                }
+                if (isFolder && indentLevel == 0) { //TODO: CHECK IF ITS USER ADDED
+                    DropdownMenuItem(onClick = {
+                        println("Remove Top Level Folder: $name")
+                        showContextMenu = false
+                    }) {
+                        Text("Remove Folder")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -352,9 +392,14 @@ fun MainSketchGrid(
     onSortChange: (SortOption) -> Unit
 ) {
     val displayedHeader = when {
-        selectedFolder != null -> selectedFolder
-        searchQuery.isNotBlank() -> "Search results for \"$searchQuery\""
-        else -> "All Sketches"
+        selectedFolder != null && searchQuery.isNotBlank() ->
+            "$selectedFolder — Search results for \"$searchQuery\""
+        selectedFolder != null ->
+            selectedFolder
+        searchQuery.isNotBlank() ->
+            "Search results for \"$searchQuery\""
+        else ->
+            "All Sketches"
     }
 
     var expanded by remember { mutableStateOf(false) }
@@ -424,7 +469,16 @@ fun MainSketchGrid(
 @Composable
 fun AddNewSketchCard() {
     Card(
-        modifier = Modifier.fillMaxWidth(),//.aspectRatio(1f), // square
+        modifier = Modifier.fillMaxWidth().clickable {
+            // Build the pde:// URI and open it
+            val pdeUri = URI("pde://sketch/new")
+            if (Desktop.isDesktopSupported()) {
+                Desktop.getDesktop().browse(pdeUri)
+            } else {
+                println("Desktop API not supported. Could not open new sketch.")
+            }
+            println("Clicked to Add New Sketch")
+        },//.aspectRatio(1f), // square
         elevation = 4.dp
     ) {
         Column(
@@ -433,9 +487,8 @@ fun AddNewSketchCard() {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(100.dp).clickable {
-                        println("Clicked to Add New Sketch")
-                    },
+                    .height(100.dp)
+                    ,
                 contentAlignment = Alignment.Center
             ) {
                 Text("+", color = Color.DarkGray)
@@ -472,7 +525,15 @@ fun SketchCard(sketch: SketchItem) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(100.dp)
-                    .background(Color.LightGray).clickable {
+                    .background(Color.LightGray)
+                    .clickable {
+                        // Build the pde:// URI and open it
+                        val pdeUri = URI("pde://${sketch.path}/${sketch.name}.pde")
+                        if (Desktop.isDesktopSupported()) {
+                            Desktop.getDesktop().browse(pdeUri)
+                        } else {
+                            println("Desktop API not supported. Could not open sketch: ${sketch.name}")
+                        }
                         println("Clicked open ${sketch.name}")
                     },
                 contentAlignment = Alignment.Center
