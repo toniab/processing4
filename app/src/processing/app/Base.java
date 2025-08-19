@@ -613,8 +613,8 @@ public class Base {
     item.addActionListener(e -> handleOpenPrompt());
     defaultFileMenu.add(item);
 
-    item = Toolkit.newJMenuItemShift(Language.text("menu.file.sketchbook"), 'K');
-    item.addActionListener(e -> showSketchbookFrame());
+    item = Toolkit.newJMenuItemShift(Language.text("menu.file.sketchbook")+"Proto", 'K');
+    item.addActionListener(e -> showSketchbookFrameProto());
     defaultFileMenu.add(item);
 
     item = Toolkit.newJMenuItemShift(Language.text("menu.file.examples"), 'O');
@@ -1904,6 +1904,8 @@ public class Base {
 
   protected SketchbookFrame sketchbookFrame;
 
+  protected JFrame sketchbookFrameProto;
+
   public DefaultMutableTreeNode buildSketchbookTree() {
     DefaultMutableTreeNode sbNode =
       new DefaultMutableTreeNode(Language.text("sketchbook.tree"));
@@ -1937,12 +1939,18 @@ public class Base {
     }
   }
 
-
   public void showSketchbookFrame() {
     if (sketchbookFrame == null) {
       sketchbookFrame = new SketchbookFrame(this);
     }
     sketchbookFrame.setVisible();
+  }
+
+  public void showSketchbookFrameProto() {
+    if (sketchbookFrameProto == null) {
+      sketchbookFrameProto = SketchbookLauncher.createSketchbookWindow();
+    }
+    sketchbookFrameProto.setVisible(true);
   }
 
 

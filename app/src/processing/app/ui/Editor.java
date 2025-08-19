@@ -705,6 +705,10 @@ public abstract class Editor extends JFrame implements RunnerListener {
     item.addActionListener(e -> base.showSketchbookFrame());
     fileMenu.add(item);
 
+    item = Toolkit.newJMenuItemShift(Language.text("menu.file.sketchbook")+"Proto", 'K');
+    item.addActionListener(e -> base.showSketchbookFrameProto());
+    fileMenu.add(item);
+
     item = Toolkit.newJMenuItemShift(Language.text("menu.file.examples"), 'O');
     item.addActionListener(e -> mode.showExamplesFrame());
     fileMenu.add(item);

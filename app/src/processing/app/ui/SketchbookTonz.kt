@@ -1,8 +1,8 @@
 package processing.app.ui
 
-import java.awt.Desktop
-import java.net.URI
-import java.io.File
+import java.awt.Desktop // for opening sketches
+import java.net.URI // for opening sketches
+import java.io.File // for reading files
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -34,7 +34,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.ui.input.pointer.pointerMoveFilter
+import androidx.compose.ui.awt.ComposePanel // for creating own window
+import javax.swing.JFrame  // for creating own window
+import javax.swing.WindowConstants  // for creating own window
 
 const val SKETCHBOOK_PATH = "/Users/tonz/Documents/Processing/sketchbook/"
 
@@ -67,11 +69,37 @@ data class DisplayItem(
     val indentLevel: Int
 )
 
+// For java launchers called from Base.java and Editor.java
+object SketchbookLauncher {
+    @JvmStatic
+    fun createSketchbookWindow(): JFrame {
+        val frame = JFrame("Sketchbook Prototype Tonz")
+
+        val composePanel = ComposePanel().apply {
+            setContent {
+                Sketchbook()
+            }
+        }
+
+        frame.defaultCloseOperation = WindowConstants.DISPOSE_ON_CLOSE
+        frame.contentPane.add(composePanel)
+        frame.setSize(800, 600)
+        frame.setLocationRelativeTo(null)
+
+        return frame
+    }
+}
+
+// For standalone testing
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "Sketchbook Prototype",
-        state = WindowState(width = 800.dp, height = 600.dp, position = WindowPosition(Alignment.Center))
+        title = "Sketchbook Prototype Tonz",
+        state = WindowState(
+            width = 800.dp,
+            height = 600.dp,
+            position = WindowPosition(Alignment.Center)
+        )
     ) {
         Sketchbook()
     }
